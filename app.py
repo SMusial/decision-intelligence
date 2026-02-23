@@ -1,4 +1,4 @@
-import streamlit as st
+'''import streamlit as st
 import pymc as pm
 import numpy as np
 import pandas as pd
@@ -64,3 +64,89 @@ if st.button('Uruchom Silnik Bayesowski (PyMC)'):
         
         st.success(f"Estymowany wpływ jakości na ROI (Beta): {b_map:.2f}")
         st.write("Wniosek: Model zignorował outliery i poprawnie wyznaczył trend mimo szumu.")
+'''
+
+import streamlit as st
+import pymc as pm
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# 1. KONFIGURACJA STRONY
+st.set_page_config(page_title="Telco DI - Interactive Lab", layout="wide")
+
+st.title("📡 Laboratorium Decision Intelligence: Faza 1")
+st.markdown("---")
+
+# 2. SIDEBAR - Hiperparametry (Twoje "pokrętła" rzeczywistości)
+with st.sidebar:
+    st.header("⚙️ Parametry Środowiska")
+    noise_sigma = st.slider("Poziom szumu (rozmycie)", 1.0, 15.0, 5.0)
+    outlier_count = st.select_slider("Liczba outlierów (błędów)", options=[0, 1, 3, 5, 10], value=3)
+    
+    st.header("🧠 Ustawienia Modelu")
+    model_type = st.radio("Typ rozkładu (Likelihood):", 
+                          ["Normal (Wrażliwy)", "Student-T (Odporny)"], 
+                          help="Student-T lepiej radzi sobie z outlierami dzięki 'grubym ogonom'.")
+
+# 3. DYNAMICZNA GENERACJA DANYCH
+np.random.seed(42)
+n_points = 100
+x = np.random.normal(5, 2.5, n_points)
+# Prawdziwy trend: y = 10 + 2.5 * x
+y = 10 + 2.5 * x + np.random.normal(0, noise_sigma, n_points)
+
+# Dodawanie outlierów
+if outlier_count > 0:
+    outlier_idx = np.random.choice(n_points, outlier_count, replace=False)
+    y[outlier_idx] += np.random.uniform(50, 100, size=outlier_count)
+
+# 4. WIZUALIZACJA DANYCH WEJŚCIOWYCH
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    st.subheader("📊 Surowe Dane (Input)")
+    fig_raw, ax_raw = plt.subplots()
+    ax_raw.scatter(x, y, alpha=0.6, color="#3498db")
+    ax_raw.set_xlabel("Jakość Sygnału")
+    ax_raw.set_ylabel("ROI")
+    st.pyplot(fig_raw)
+
+# 5. SILNIK BAYESOWSKI (Uruchamiany przyciskiem)
+with col2:
+    st.subheader("🔮 Wynik Modelowania (Output)")
+    if st.button("🚀 Uruchom Analizę Bayesowską"):
+        with st.spinner("Model 'myśli' (próbkowanie MCMC)..."):
+            with pm.Model() as model:
+                alpha = pm.Normal("alpha", mu=10, sigma=10)
+                beta = pm.Normal("beta", mu=2, sigma=5)
+                sigma = pm.HalfNormal("sigma", sigma=10)
+                
+                mu = alpha + beta * x
+                
+                if model_type == "Student-T (Odporny)":
+                    nu = pm.Exponential("nu", 1/10)
+                    y_obs = pm.StudentT("y_obs", nu=nu, mu=mu, sigma=sigma, observed=y)
+                else:
+                    y_obs = pm.Normal("y_obs", mu=mu, sigma=sigma, observed=y)
+                
+                trace = pm.sample(1000, chains=2, progressbar=False)
+
+            # Rysowanie wyniku
+            fig_res, ax_res = plt.subplots()
+            ax_res.scatter(x, y, alpha=0.3)
+            
+            # Pobieranie średnich parametrów z "Posterior"
+            b_est = trace.posterior["beta"].mean().values
+            a_est = trace.posterior["alpha"].mean().values
+            
+            x_range = np.linspace(x.min(), x.max(), 100)
+            ax_res.plot(x_range, a_est + b_est * x_range, color="red", lw=3, label=f"Trend: {b_est:.2f}")
+            ax_res.legend()
+            st.pyplot(fig_res)
+            
+            st.success(f"Analiza zakończona! Estymowany wpływ jakości na ROI: {b_est:.2f}")
+    else:
+        st.info("Kliknij przycisk powyżej, aby uruchomić modelowanie na tych danych.")
+
+        
